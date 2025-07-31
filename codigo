@@ -1,0 +1,544 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Pesadelo Procedural: Insanidade</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            background-color: #000;
+            color: #fff;
+            font-family: 'Courier New', Courier, monospace;
+            overflow: hidden;
+        }
+
+        #gameContainer {
+            position: relative;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            width: 100%;
+            height: 100%;
+        }
+
+        canvas {
+            background-color: #111;
+            border: 2px solid #333;
+            box-shadow: 0 0 20px rgba(255, 0, 0, 0.5);
+            transition: filter 2s ease-in-out, box-shadow 2s ease-in-out;
+        }
+
+        #ui-layer {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            text-align: center;
+            pointer-events: none;
+        }
+
+        #message {
+            font-size: 2em;
+            text-shadow: 0 0 10px #ff0000;
+            opacity: 0;
+            transition: opacity 1s;
+        }
+
+        #startButton {
+            font-size: 1.5em;
+            padding: 15px 30px;
+            background: #111;
+            border: 2px solid #f00;
+            color: #f00;
+            cursor: pointer;
+            text-transform: uppercase;
+            letter-spacing: 2px;
+            pointer-events: all;
+            box-shadow: 0 0 15px #f00;
+            transition: background 0.3s, color 0.3s, box-shadow 0.3s;
+        }
+
+        #startButton:hover {
+            background: #f00;
+            color: #000;
+            box-shadow: 0 0 25px #f00, 0 0 40px #f00;
+        }
+
+        #top-ui {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            right: 10px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            pointer-events: none;
+        }
+        
+        #dreamLevelDisplay, #memoryCounter {
+            font-size: 1.2em;
+            color: #aaa;
+            text-shadow: 0 0 5px #000;
+            background: rgba(0,0,0,0.5);
+            padding: 5px 10px;
+            border-radius: 5px;
+        }
+        
+        #sanityMeter {
+            width: 200px;
+            height: 20px;
+            background-color: #444;
+            border: 1px solid #666;
+            border-radius: 5px;
+            overflow: hidden;
+        }
+
+        #sanityBar {
+            width: 100%;
+            height: 100%;
+            background-color: #00aaff;
+            transition: width 0.5s linear, background-color 0.5s linear;
+        }
+
+        #horrorText {
+            position: absolute;
+            font-size: 3em;
+            color: #ff0000;
+            text-shadow: 0 0 15px #ff0000;
+            opacity: 0;
+            transition: opacity 0.2s;
+            animation: flicker 1.5s infinite alternate;
+        }
+
+        @keyframes flicker {
+            0%, 18%, 22%, 25%, 53%, 57%, 100% {
+                text-shadow:
+                0 0 4px #fff,
+                0 0 11px #fff,
+                0 0 19px #fff,
+                0 0 40px #f09,
+                0 0 80px #f09,
+                0 0 90px #f09,
+                0 0 100px #f09,
+                0 0 150px #f09;
+            }
+            20%, 24%, 55% {        
+                text-shadow: none;
+            }
+        }
+
+    </style>
+</head>
+<body>
+    <div id="gameContainer">
+        <canvas id="gameCanvas"></canvas>
+        <div id="ui-layer">
+            <h1 id="title">Pesadelo Procedural</h1>
+            <p id="instructions">Colete as memórias para encontrar a saída. Não enlouqueça.</p>
+            <button id="startButton">Começar a Sonhar</button>
+            <p id="message"></p>
+            <p id="horrorText"></p>
+        </div>
+        <div id="top-ui">
+            <div id="dreamLevelDisplay"></div>
+            <div id="sanityMeter"><div id="sanityBar"></div></div>
+            <div id="memoryCounter"></div>
+        </div>
+    </div>
+
+    <script>
+        
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+        const startButton = document.getElementById('startButton');
+        const title = document.getElementById('title');
+        const instructions = document.getElementById('instructions');
+        const messageEl = document.getElementById('message');
+        const dreamLevelDisplay = document.getElementById('dreamLevelDisplay');
+        const sanityBar = document.getElementById('sanityBar');
+        const memoryCounter = document.getElementById('memoryCounter');
+        const horrorTextEl = document.getElementById('horrorText');
+
+      
+        let maze, player, monster, exit;
+        let memories = [];
+        let tileSize = 20;
+        let mazeWidth, mazeHeight;
+        let dreamLevel = 1;
+        let gameActive = false;
+        let sanity, maxSanity;
+        let exitActive = false;
+
+       
+        let audioCtx, ambientDrone, droneGain;
+        const horrorPhrases = [
+            "NÃO OLHE PARA TRÁS", "ESTÁ TE VENDO", "VOCÊ NÃO ESTÁ SOZINHO",
+            "ACORDE", "É SÓ UM SONHO?", "FUJA", "ELE SABE SEU NOME"
+        ];
+
+       
+        const initialMazeSize = 15;
+        const monsterBaseSpeed = 0.03;
+
+      
+        function setupAudio() {
+            if (audioCtx) return;
+            try {
+                audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+                ambientDrone = audioCtx.createOscillator();
+                droneGain = audioCtx.createGain();
+                ambientDrone.type = 'sawtooth';
+                ambientDrone.frequency.setValueAtTime(50, audioCtx.currentTime);
+                droneGain.gain.setValueAtTime(0, audioCtx.currentTime);
+                ambientDrone.connect(droneGain).connect(audioCtx.destination);
+                ambientDrone.start();
+            } catch (e) { console.error("Web Audio API não suportada.", e); }
+        }
+
+        function adjustAudioDistortion() {
+            if (!audioCtx) return;
+            const gain = 0.05 + (dreamLevel - 1) * 0.02 + (1 - sanity / maxSanity) * 0.1;
+            const freq = 50 - (dreamLevel - 1) * 2 - (1 - sanity / maxSanity) * 20;
+            droneGain.gain.linearRampToValueAtTime(Math.min(gain, 0.25), audioCtx.currentTime + 1);
+            ambientDrone.frequency.linearRampToValueAtTime(Math.max(freq, 20), audioCtx.currentTime + 1);
+        }
+
+        function playSoundEffect(type, options = {}) {
+            if (!audioCtx) return;
+            const osc = audioCtx.createOscillator();
+            const gain = audioCtx.createGain();
+            osc.connect(gain).connect(audioCtx.destination);
+
+            switch(type) {
+                case 'win':
+                    osc.type = 'sine';
+                    osc.frequency.setValueAtTime(523.25, audioCtx.currentTime);
+                    gain.gain.setValueAtTime(0.2, audioCtx.currentTime).exponentialRampToValueAtTime(0.0001, audioCtx.currentTime + 1.5);
+                    break;
+                case 'lose':
+                    osc.type = 'square';
+                    osc.frequency.setValueAtTime(110, audioCtx.currentTime);
+                    gain.gain.setValueAtTime(0.3, audioCtx.currentTime).exponentialRampToValueAtTime(0.0001, audioCtx.currentTime + 1.5);
+                    break;
+                case 'memory':
+                    osc.type = 'triangle';
+                    osc.frequency.setValueAtTime(659.25, audioCtx.currentTime);
+                    gain.gain.setValueAtTime(0.25, audioCtx.currentTime).exponentialRampToValueAtTime(0.0001, audioCtx.currentTime + 0.5);
+                    break;
+                case 'scream':
+                    osc.type = 'sawtooth';
+                    gain.gain.setValueAtTime(0.4, audioCtx.currentTime);
+                    osc.frequency.setValueAtTime(800, audioCtx.currentTime);
+                    osc.frequency.exponentialRampToValueAtTime(2000, audioCtx.currentTime + 0.1);
+                    osc.frequency.exponentialRampToValueAtTime(600, audioCtx.currentTime + 0.3);
+                    gain.gain.exponentialRampToValueAtTime(0.0001, audioCtx.currentTime + 0.4);
+                    break;
+            }
+            osc.start();
+            osc.stop(audioCtx.currentTime + (type === 'scream' ? 0.4 : 1.5));
+        }
+
+      
+        function generateMaze(cols, rows) {
+            let grid = Array(rows).fill(null).map(() => Array(cols).fill(1));
+            function carve(x, y) {
+                grid[y][x] = 0;
+                let neighbors = [[x-2,y,x-1,y], [x+2,y,x+1,y], [x,y-2,x,y-1], [x,y+2,x,y+1]];
+                neighbors.sort(() => Math.random() - 0.5);
+                for (let [nx, ny, wx, wy] of neighbors) {
+                    if (nx > 0 && nx < cols && ny > 0 && ny < rows && grid[ny][nx] === 1) {
+                        grid[wy][wx] = 0;
+                        carve(nx, ny);
+                    }
+                }
+            }
+            carve(1, 1);
+            return grid;
+        }
+
+        function spawnMemories(count) {
+            memories = [];
+            let attempts = 0;
+            while (memories.length < count && attempts < 1000) {
+                const x = Math.floor(Math.random() * (mazeWidth - 2)) + 1;
+                const y = Math.floor(Math.random() * (mazeHeight - 2)) + 1;
+                if (maze[y][x] === 0 && (x > 3 || y > 3)) { // Não gerar perto do início
+                    memories.push({ x, y, collected: false });
+                }
+                attempts++;
+            }
+        }
+
+        
+        function drawPlayer() {
+            ctx.fillStyle = 'rgba(255, 255, 255, 0.9)';
+            ctx.fillRect(player.x * tileSize, player.y * tileSize, tileSize, tileSize);
+            ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
+            ctx.fillRect(player.x * tileSize + tileSize/4, player.y * tileSize + tileSize/4, tileSize/2, tileSize/2);
+        }
+
+        function drawMonster() {
+            const jitter = (1 - sanity / maxSanity) * dreamLevel * 1.5;
+            const jitterX = (Math.random() - 0.5) * jitter;
+            const jitterY = (Math.random() - 0.5) * jitter;
+            ctx.fillStyle = 'rgba(200, 0, 0, 0.7)';
+            ctx.fillRect((monster.x + jitterX) * tileSize, (monster.y + jitterY) * tileSize, tileSize, tileSize);
+        }
+
+        function drawExit() {
+            if (!exitActive) return;
+            const pulse = Math.sin(Date.now() * 0.005) * (tileSize / 8) + (tileSize / 2.5);
+            ctx.beginPath();
+            ctx.arc(exit.x * tileSize + tileSize / 2, exit.y * tileSize + tileSize / 2, pulse, 0, Math.PI * 2);
+            ctx.fillStyle = 'rgba(255, 255, 255, 0.9)';
+            ctx.shadowColor = 'white';
+            ctx.shadowBlur = 15;
+            ctx.fill();
+            ctx.shadowBlur = 0;
+        }
+
+        function drawMaze() {
+            ctx.fillStyle = '#333';
+            for (let y = 0; y < mazeHeight; y++) {
+                for (let x = 0; x < mazeWidth; x++) {
+                    if (maze[y][x] === 1) {
+                        ctx.fillRect(x * tileSize, y * tileSize, tileSize, tileSize);
+                    }
+                }
+            }
+        }
+
+        function drawMemories() {
+            ctx.fillStyle = 'rgba(0, 170, 255, 0.8)';
+            ctx.shadowColor = '#00aaff';
+            ctx.shadowBlur = 10;
+            memories.forEach(mem => {
+                ctx.beginPath();
+                ctx.arc(mem.x * tileSize + tileSize / 2, mem.y * tileSize + tileSize / 2, tileSize / 3, 0, Math.PI * 2);
+                ctx.fill();
+            });
+            ctx.shadowBlur = 0;
+        }
+
+       
+        function setupLevel() {
+            let size = initialMazeSize + (dreamLevel - 1) * 2;
+            mazeWidth = size;
+            mazeHeight = size;
+            canvas.width = mazeWidth * tileSize;
+            canvas.height = mazeHeight * tileSize;
+
+            maxSanity = 100;
+            sanity = maxSanity;
+
+            maze = generateMaze(mazeWidth, mazeHeight);
+            spawnMemories(2 + dreamLevel);
+
+            player = { x: 1.5, y: 1.5 };
+            monster = { x: mazeWidth - 1.5, y: mazeHeight - 1.5 };
+            exit = { x: mazeWidth - 2, y: mazeHeight - 2 };
+            exitActive = false;
+
+            dreamLevelDisplay.textContent = `Sonho: ${dreamLevel}`;
+            applyNightmareEffect();
+            adjustAudioDistortion();
+        }
+
+        function updateSanity() {
+            const monsterDist = Math.hypot(player.x - monster.x, player.y - monster.y);
+           
+            let sanityDrain = 0.03 + dreamLevel * 0.01; 
+            if (monsterDist < 8) {
+                
+                sanityDrain += (8 - monsterDist) * 0.02; 
+            }
+            sanity = Math.max(0, sanity - sanityDrain);
+
+            const sanityPercent = sanity / maxSanity;
+            sanityBar.style.width = `${sanityPercent * 100}%`;
+            if (sanityPercent < 0.3) sanityBar.style.backgroundColor = '#ff0000';
+            else if (sanityPercent < 0.6) sanityBar.style.backgroundColor = '#ffaa00';
+            else sanityBar.style.backgroundColor = '#00aaff';
+
+            if (sanity <= 0) {
+                endGame(false, "Sua mente se partiu.");
+            }
+            
+           
+            if (Math.random() < (1 - sanityPercent) * 0.001) {
+                playSoundEffect('scream');
+            }
+            
+            if (Math.random() < (1 - sanityPercent) * 0.0015) { 
+                flashHorrorText();
+            }
+        }
+
+        function flashHorrorText() {
+            horrorTextEl.textContent = horrorPhrases[Math.floor(Math.random() * horrorPhrases.length)];
+            horrorTextEl.style.opacity = '1';
+            setTimeout(() => { horrorTextEl.style.opacity = '0'; }, 1500);
+        }
+
+        function applyNightmareEffect() {
+            const intensity = (1 - sanity / maxSanity) * 0.7;
+            const blur = intensity * 2;
+            const hue = (dreamLevel - 1) * 10 + intensity * 45;
+            canvas.style.filter = `saturate(${1 - intensity}) blur(${blur}px) hue-rotate(${hue}deg)`;
+        }
+
+        function movePlayer(dx, dy) {
+            if (!gameActive) return;
+            const newX = player.x + dx;
+            const newY = player.y + dy;
+            const gridX1 = Math.floor(newX - 0.4), gridY1 = Math.floor(newY - 0.4);
+            const gridX2 = Math.floor(newX + 0.4), gridY2 = Math.floor(newY + 0.4);
+
+            if (maze[gridY1]?.[gridX1] !== 1 && maze[gridY1]?.[gridX2] !== 1 && maze[gridY2]?.[gridX1] !== 1 && maze[gridY2]?.[gridX2] !== 1) {
+                player.x = newX;
+                player.y = newY;
+            }
+        }
+        
+        function updateMonster() {
+            const speed = monsterBaseSpeed * Math.sqrt(dreamLevel) + (1 - sanity/maxSanity) * 0.05;
+            const dx = player.x - monster.x;
+            const dy = player.y - monster.y;
+            const dist = Math.hypot(dx, dy);
+            
+            if (dist > 0) {
+                const moveX = (dx / dist) * speed;
+                const moveY = (dy / dist) * speed;
+                const newX = monster.x + moveX;
+                const newY = monster.y + moveY;
+                const gridX = Math.floor(newX), gridY = Math.floor(newY);
+
+                if (maze[gridY]?.[gridX] !== 1) {
+                    monster.x = newX;
+                    monster.y = newY;
+                }
+            }
+        }
+
+        function checkCollisions() {
+          
+            if (Math.hypot(player.x - monster.x, player.y - monster.y) < 0.8) {
+                endGame(false, "O pesadelo te consumiu.");
+            }
+
+            
+            if (exitActive && Math.hypot(player.x - (exit.x + 0.5), player.y - (exit.y + 0.5)) < 1) {
+                endGame(true);
+            }
+
+            
+            for (let i = memories.length - 1; i >= 0; i--) {
+                const mem = memories[i];
+                if (Math.hypot(player.x - (mem.x + 0.5), player.y - (mem.y + 0.5)) < 1) {
+                    memories.splice(i, 1);
+                    sanity = Math.min(maxSanity, sanity + 15);
+                    playSoundEffect('memory');
+                    flashHorrorText();
+                    if (memories.length === 0) {
+                        exitActive = true;
+                        showMessage("A SAÍDA APARECEU. CORRA.", 2000);
+                    }
+                }
+            }
+        }
+
+        function showMessage(text, duration = 2000) {
+            messageEl.textContent = text;
+            messageEl.style.opacity = '1';
+            setTimeout(() => { messageEl.style.opacity = '0'; }, duration);
+        }
+
+        function startGame() {
+            setupAudio();
+            title.style.display = 'none';
+            instructions.style.display = 'none';
+            startButton.style.display = 'none';
+            gameActive = true;
+            dreamLevel = 1;
+            setupLevel();
+            gameLoop();
+        }
+
+        function endGame(win, loseMessage = "Fim de jogo") {
+            gameActive = false;
+            if (win) {
+                dreamLevel++;
+                showMessage("Você acordou... por enquanto.", 2500);
+                playSoundEffect('win');
+                setTimeout(() => {
+                    gameActive = true;
+                    setupLevel();
+                    gameLoop();
+                }, 2500);
+            } else {
+                showMessage(loseMessage, 3000);
+                playSoundEffect('lose');
+                canvas.style.filter = 'grayscale(100%) blur(5px)';
+                setTimeout(() => {
+                    title.style.display = 'block';
+                    instructions.style.display = 'block';
+                    startButton.textContent = "Tentar Sonhar Novamente";
+                    startButton.style.display = 'block';
+                    dreamLevelDisplay.textContent = '';
+                    memoryCounter.textContent = '';
+                    sanityBar.style.width = '100%';
+                    canvas.style.filter = 'none';
+                    ctx.clearRect(0, 0, canvas.width, canvas.height);
+                }, 3000);
+            }
+        }
+
+       
+        function gameLoop() {
+            if (!gameActive) return;
+
+            updateSanity();
+            updateMonster();
+            checkCollisions();
+            applyNightmareEffect();
+            adjustAudioDistortion();
+            
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            drawMaze();
+            drawMemories();
+            drawExit();
+            drawMonster();
+            drawPlayer();
+            
+            memoryCounter.textContent = `Memórias: ${memories.length}`;
+
+            requestAnimationFrame(gameLoop);
+        }
+
+       
+        window.addEventListener('keydown', (e) => {
+            const speed = 0.15;
+            switch (e.key) {
+                case 'ArrowUp': case 'w': movePlayer(0, -speed); break;
+                case 'ArrowDown': case 's': movePlayer(0, speed); break;
+                case 'ArrowLeft': case 'a': movePlayer(-speed, 0); break;
+                case 'ArrowRight': case 'd': movePlayer(speed, 0); break;
+            }
+        });
+
+        startButton.addEventListener('click', startGame);
+    </script>
+</body>
+</html>
